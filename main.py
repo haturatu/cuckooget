@@ -59,7 +59,7 @@ class CuckooHash:
             self.table[h2] = None
 
 class AsyncWebMirror:
-    def __init__(self, start_url, output_dir, max_connections=50):
+    def __init__(self, start_url, output_dir, max_connections=50, weights=None):
         self.start_url = start_url
         self.output_dir = output_dir
         self.domain = urlparse(start_url).netloc
@@ -67,7 +67,9 @@ class AsyncWebMirror:
         self.downloading = CuckooHash(1000)
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
-        self.task_queue = asyncio.Queue()
+        self.task_queue = asyncio.PriorityQueue()
+        self.weights = weights or []
+        self.image_semaphore = asyncio.Semaphore(max_connections * 2)
 
     async def download_resource(self, url, session):
         if self.downloading.get(url):
@@ -76,7 +78,7 @@ class AsyncWebMirror:
         self.downloading.insert(url, True)
         try:
             async with self.semaphore:
-                async with session.get(url, timeout=15) as response:
+                async with session.get(url, timeout=300) as response:
                     if response.status == 200:
                         content_type = response.headers.get('content-type', '').split(';')[0]
                         if content_type.startswith('text') or url.endswith('.php'):
@@ -128,24 +130,31 @@ class AsyncWebMirror:
         return os.path.relpath(file_path, self.output_dir)
 
     def process_links(self, soup, base_url):
-        for tag in soup.find_all(['a', 'link', 'img', 'script']):
+        for tag in soup.find_all(['a', 'link', 'script']):
             attr = 'href' if tag.name in ['a', 'link'] else 'src'
             url = tag.get(attr)
             if url:
                 full_url = urljoin(base_url, url)
-                if urlparse(full_url).netloc.endswith(self.domain) and not self.visited.get(full_url):
-                    yield full_url, tag
+                if self.domain in full_url and not self.visited.get(full_url):
+                    priority = self.get_url_priority(full_url)
+                    yield priority, full_url, (tag.name, attr)
+
+    def get_url_priority(self, url):
+        for i, weight in enumerate(self.weights):
+            if weight in url:
+                return i
+        return len(self.weights)
 
     async def mirror_site(self):
-        await self.task_queue.put((self.start_url, None))
+        await self.task_queue.put((0, 0, self.start_url, None))
 
         async with aiohttp.ClientSession() as session:
             tasks = set()
             while not self.task_queue.empty() or tasks:
                 while len(tasks) < self.max_connections and not self.task_queue.empty():
-                    url, tag = await self.task_queue.get()
+                    _, count, url, tag_info = await self.task_queue.get()
                     if not self.visited.get(url):
-                        task = asyncio.create_task(self.process_url(url, tag, session))
+                        task = asyncio.create_task(self.process_url(url, tag_info, session, count))
                         tasks.add(task)
 
                 if tasks:
@@ -153,7 +162,7 @@ class AsyncWebMirror:
                     for task in done:
                         await task
 
-    async def process_url(self, url, tag, session):
+    async def process_url(self, url, tag_info, session, count):
         if self.visited.get(url):
             return
 
@@ -166,21 +175,21 @@ class AsyncWebMirror:
 
         if content_type.startswith('text/html'):
             soup = BeautifulSoup(content, 'html.parser')
-            img_tasks = []
 
+            img_tasks = []
             for img_tag in soup.find_all('img', src=True):
                 img_url = urljoin(url, img_tag['src'])
                 if not self.visited.get(img_url):
                     img_tasks.append(self.download_and_save_image(img_url, img_tag, session))
 
-            for new_url, new_tag in self.process_links(soup, url):
-                await self.task_queue.put((new_url, new_tag))
+            for priority, new_url, new_tag_info in self.process_links(soup, url):
+                await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
 
             for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
                 attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
                 if new_tag.get(attr):
                     new_full_url = urljoin(url, new_tag[attr])
-                    if urlparse(new_full_url).netloc.endswith(self.domain):
+                    if self.domain in new_full_url:
                         new_relative_path = os.path.relpath(
                             self.get_file_path(new_full_url),
                             os.path.dirname(self.get_file_path(url))
@@ -197,27 +206,33 @@ class AsyncWebMirror:
 
         relative_path = await self.save_resource(url, content, content_type)
 
-        if tag:
-            attr = 'href' if tag.name in ['a', 'link'] else 'src'
+        if tag_info:
+            tag_name, attr = tag_info
+            soup = BeautifulSoup('', 'html.parser')
+            tag = soup.new_tag(tag_name)
             tag[attr] = relative_path
+            print(f"Updated tag: {tag}")
 
     async def download_and_save_image(self, img_url, img_tag, session):
-        if not self.visited.get(img_url):
-            img_content, img_content_type = await self.download_resource(img_url, session)
-            if img_content is not None:
-                img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
-                img_tag['src'] = img_relative_path
+        async with self.image_semaphore:
+            if not self.visited.get(img_url):
+                img_content, img_content_type = await self.download_resource(img_url, session)
+                if img_content is not None:
+                    img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
+                    img_tag['src'] = img_relative_path
 
 async def main():
     parser = argparse.ArgumentParser(description='ウェブサイトをミラーリングします。')
     parser.add_argument('url', help='ミラーリングするウェブサイトのURL')
     parser.add_argument('output_dir', help='ミラーリングしたファイルを保存するディレクトリ')
-    parser.add_argument('--connections', type=int, default=50, help='同時接続数 (デフォルト: 50)')
+    parser.add_argument('-c', '--connections', type=int, default=50, help='同時接続数 (デフォルト: 50)')
+    parser.add_argument('-w', '--weights', nargs='+', help='URLの優先度を設定する文字列（スペース区切りで複数指定可能）')
     args = parser.parse_args()
 
-    mirror = AsyncWebMirror(args.url, args.output_dir, max_connections=args.connections)
+    mirror = AsyncWebMirror(args.url, args.output_dir, max_connections=args.connections, weights=args.weights)
     await mirror.mirror_site()
     print("ミラーリングが完了しました。")
 
 if __name__ == "__main__":
     asyncio.run(main())
+
