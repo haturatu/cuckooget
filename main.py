@@ -6,7 +6,7 @@ import aiohttp
 from aiohttp import ClientSession
 import aiofiles
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 import os
 import hashlib
 import random
@@ -134,7 +134,7 @@ class AsyncWebMirror:
         return relative_path
 
     def process_links(self, soup, base_url):
-        for tag in soup.find_all(['a', 'link', 'script']):
+        for tag in soup.find_all(['a', 'link', 'script', 'img']):
             attr = 'href' if tag.name in ['a', 'link'] else 'src'
             url = tag.get(attr)
             if url:
@@ -200,10 +200,13 @@ class AsyncWebMirror:
                 attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
                 if new_tag.get(attr):
                     new_full_url = urljoin(url, new_tag[attr])
-                    if self.domain in new_full_url:
-                        new_relative_path = self.get_relative_path(url, new_full_url)
-                        if new_relative_path:
-                            new_tag[attr] = new_relative_path
+                    new_relative_path = self.get_relative_path(url, new_full_url)
+                    if new_relative_path:
+                        new_tag[attr] = new_relative_path
+                    elif self.domain in new_full_url:
+                        parsed_url = urlparse(new_full_url)
+                        new_path = os.path.relpath(self.get_file_path(new_full_url), os.path.dirname(self.get_file_path(url)))
+                        new_tag[attr] = new_path
 
             for a_tag in soup.find_all('a', href=True):
                 if a_tag['href'].endswith('.php'):
@@ -231,6 +234,8 @@ class AsyncWebMirror:
                     new_relative_path = self.get_relative_path(parent_url, img_url)
                     if new_relative_path:
                         img_tag['src'] = new_relative_path
+                    else:
+                        img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
 
 async def main():
     parser = argparse.ArgumentParser(description='ウェブサイトをミラーリングします。')
