@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+
 import argparse
 import asyncio
 import aiohttp
@@ -65,6 +66,7 @@ class AsyncWebMirror:
         self.domain = urlparse(start_url).netloc
         self.visited = CuckooHash(10000)
         self.downloading = CuckooHash(1000)
+        self.path_map = CuckooHash(10000)
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
         self.task_queue = asyncio.PriorityQueue()
@@ -127,7 +129,9 @@ class AsyncWebMirror:
         except Exception as e:
             print(f"Error saving {url}: {e}")
 
-        return os.path.relpath(file_path, self.output_dir)
+        relative_path = os.path.relpath(file_path, self.output_dir)
+        self.path_map.insert(url, relative_path)
+        return relative_path
 
     def process_links(self, soup, base_url):
         for tag in soup.find_all(['a', 'link', 'script']):
@@ -144,6 +148,13 @@ class AsyncWebMirror:
             if weight in url:
                 return i
         return len(self.weights)
+
+    def get_relative_path(self, from_url, to_url):
+        from_path = self.path_map.get(from_url)
+        to_path = self.path_map.get(to_url)
+        if from_path and to_path:
+            return os.path.relpath(to_path, os.path.dirname(from_path))
+        return None
 
     async def mirror_site(self):
         await self.task_queue.put((0, 0, self.start_url, None))
@@ -180,7 +191,7 @@ class AsyncWebMirror:
             for img_tag in soup.find_all('img', src=True):
                 img_url = urljoin(url, img_tag['src'])
                 if not self.visited.get(img_url):
-                    img_tasks.append(self.download_and_save_image(img_url, img_tag, session))
+                    img_tasks.append(self.download_and_save_image(img_url, img_tag, session, url))
 
             for priority, new_url, new_tag_info in self.process_links(soup, url):
                 await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
@@ -190,11 +201,9 @@ class AsyncWebMirror:
                 if new_tag.get(attr):
                     new_full_url = urljoin(url, new_tag[attr])
                     if self.domain in new_full_url:
-                        new_relative_path = os.path.relpath(
-                            self.get_file_path(new_full_url),
-                            os.path.dirname(self.get_file_path(url))
-                        )
-                        new_tag[attr] = new_relative_path
+                        new_relative_path = self.get_relative_path(url, new_full_url)
+                        if new_relative_path:
+                            new_tag[attr] = new_relative_path
 
             for a_tag in soup.find_all('a', href=True):
                 if a_tag['href'].endswith('.php'):
@@ -213,13 +222,15 @@ class AsyncWebMirror:
             tag[attr] = relative_path
             print(f"Updated tag: {tag}")
 
-    async def download_and_save_image(self, img_url, img_tag, session):
+    async def download_and_save_image(self, img_url, img_tag, session, parent_url):
         async with self.image_semaphore:
             if not self.visited.get(img_url):
                 img_content, img_content_type = await self.download_resource(img_url, session)
                 if img_content is not None:
                     img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
-                    img_tag['src'] = img_relative_path
+                    new_relative_path = self.get_relative_path(parent_url, img_url)
+                    if new_relative_path:
+                        img_tag['src'] = new_relative_path
 
 async def main():
     parser = argparse.ArgumentParser(description='ウェブサイトをミラーリングします。')
