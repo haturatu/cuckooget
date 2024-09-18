@@ -133,7 +133,7 @@ class AsyncWebMirror:
             url = tag.get(attr)
             if url:
                 full_url = urljoin(base_url, url)
-                if self.domain in full_url and not self.visited.get(full_url):
+                if urlparse(full_url).netloc.endswith(self.domain) and not self.visited.get(full_url):
                     yield full_url, tag
 
     async def mirror_site(self):
@@ -180,7 +180,7 @@ class AsyncWebMirror:
                 attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
                 if new_tag.get(attr):
                     new_full_url = urljoin(url, new_tag[attr])
-                    if self.domain in new_full_url:
+                    if urlparse(new_full_url).netloc.endswith(self.domain):
                         new_relative_path = os.path.relpath(
                             self.get_file_path(new_full_url),
                             os.path.dirname(self.get_file_path(url))
@@ -198,7 +198,8 @@ class AsyncWebMirror:
         relative_path = await self.save_resource(url, content, content_type)
 
         if tag:
-            tag[tag.name] = relative_path
+            attr = 'href' if tag.name in ['a', 'link'] else 'src'
+            tag[attr] = relative_path
 
     async def download_and_save_image(self, img_url, img_tag, session):
         if not self.visited.get(img_url):
