@@ -16,6 +16,8 @@ class CuckooHash:
         self.size = size
         self.table = [None] * size
         self.max_kicks = 500
+        self.load_factor = 0
+        self.resize_threshold = 0.75
 
     def hash1(self, key):
         return int(hashlib.md5(key.encode()).hexdigest(), 16) % self.size
@@ -24,9 +26,13 @@ class CuckooHash:
         return int(hashlib.sha256(key.encode()).hexdigest(), 16) % self.size
 
     def insert(self, key, value):
+        if self.load_factor >= self.resize_threshold:
+            self._resize()
+
         for _ in range(self.max_kicks):
             key, value = self._insert(key, value)
             if key is None:
+                self.load_factor = sum(1 for item in self.table if item is not None) / self.size
                 return True
         return False
 
@@ -56,8 +62,19 @@ class CuckooHash:
         h1, h2 = self.hash1(key), self.hash2(key)
         if self.table[h1] and self.table[h1][0] == key:
             self.table[h1] = None
+            self.load_factor -= 1 / self.size
         elif self.table[h2] and self.table[h2][0] == key:
             self.table[h2] = None
+            self.load_factor -= 1 / self.size
+
+    def _resize(self):
+        old_table = self.table
+        self.size *= 2
+        self.table = [None] * self.size
+        self.load_factor = 0
+        for item in old_table:
+            if item:
+                self.insert(item[0], item[1])
 
 class AsyncWebMirror:
     def __init__(self, start_url, output_dir, max_connections=50, weights=None):
@@ -251,4 +268,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
