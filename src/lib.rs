@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
+use rand::random;
 use xxhash_rust::xxh32::Xxh32;
 use xxhash_rust::xxh64::Xxh64;
-use rand::random;
 
 #[pyclass]
 struct CuckooHash {
@@ -60,9 +60,15 @@ impl CuckooHash {
             }
 
             if random::<bool>() {
-                std::mem::swap(&mut self.table1[h1], &mut Some((key.clone(), value.clone())));
+                std::mem::swap(
+                    &mut self.table1[h1],
+                    &mut Some((key.clone(), value.clone())),
+                );
             } else {
-                std::mem::swap(&mut self.table2[h2], &mut Some((key.clone(), value.clone())));
+                std::mem::swap(
+                    &mut self.table2[h2],
+                    &mut Some((key.clone(), value.clone())),
+                );
             }
         }
 
@@ -130,4 +136,3 @@ fn cuckoo_hash(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<CuckooHash>()?;
     Ok(())
 }
-
