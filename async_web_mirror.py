@@ -27,7 +27,7 @@ class AsyncWebMirror:
         if self.downloading.get(url):
             return None, None
 
-        self.downloading.insert(url, True)
+        self.downloading.insert(url, "True")
         try:
             async with self.semaphore:
                 async with session.get(url, timeout=300) as response:
@@ -132,7 +132,7 @@ class AsyncWebMirror:
         if content is None:
             return
 
-        self.visited.insert(url, True)
+        self.visited.insert(url, "True")
 
         if content_type.startswith('text/html'):
             soup = BeautifulSoup(content, 'html.parser')
@@ -146,18 +146,17 @@ class AsyncWebMirror:
             for priority, new_url, new_tag_info in self.process_links(soup, url):
                 await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
 
-            if self.weights:
-                for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
-                    attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
-                    if new_tag.get(attr):
-                        new_full_url = urljoin(url, new_tag[attr])
-                        new_relative_path = self.get_relative_path(url, new_full_url)
-                        if new_relative_path:
-                            new_tag[attr] = new_relative_path
-                        elif self.domain in new_full_url:
-                            parsed_url = urlparse(new_full_url)
-                            new_path = os.path.relpath(self.get_file_path(new_full_url), os.path.dirname(self.get_file_path(url)))
-                            new_tag[attr] = new_path
+            for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
+                attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
+                if new_tag.get(attr):
+                    new_full_url = urljoin(url, new_tag[attr])
+                    new_relative_path = self.get_relative_path(url, new_full_url)
+                    if new_relative_path:
+                        new_tag[attr] = new_relative_path
+                    elif self.domain in new_full_url:
+                        parsed_url = urlparse(new_full_url)
+                        new_path = os.path.relpath(self.get_file_path(new_full_url), os.path.dirname(self.get_file_path(url)))
+                        new_tag[attr] = new_path
 
             for a_tag in soup.find_all('a', href=True):
                 if a_tag['href'].endswith('.php'):
@@ -187,3 +186,4 @@ class AsyncWebMirror:
                         img_tag['src'] = new_relative_path
                     else:
                         img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
+
