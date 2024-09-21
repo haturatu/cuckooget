@@ -15,7 +15,15 @@ It consists of xxh32 and xxh64 as different hash values.
 ## Install
 deps
 ```
+pip install maturin
 pip install -r requirements.txt
+```
+
+You can build the CuckooHashtables implemented in Rust and install it using pip. This will allow you to call it from your Python code. If you prefer not to install it globally, you can also install it from within a virtual environment.
+```
+maturin build
+pip install target/wheels/your_package_name.whl
+
 chmod +x main.py
 ```
 

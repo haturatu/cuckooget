@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-
+#/usr/bin/pyrhon3
 import argparse
 import asyncio
 from async_web_mirror import AsyncWebMirror
@@ -13,9 +12,11 @@ async def main():
     parser.add_argument('-v', '--exclude', nargs='+', help='除外するURLのパターン（スペース区切りで複数指定可能）')
     args = parser.parse_args()
 
-    mirror = AsyncWebMirror(args.url, args.output_dir, max_connections=args.connections, weights=args.weights, excluded_urls=args.exclude)
+    mirror = AsyncWebMirror(args.url, args.output_dir, max_connections=args.connections, 
+                            weights=args.weights, excluded_urls=args.exclude)
     await mirror.mirror_site()
     print("ミラーリングが完了しました。")
 
 if __name__ == "__main__":
     asyncio.run(main())
+
