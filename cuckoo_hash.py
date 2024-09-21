@@ -12,11 +12,15 @@ class CuckooHash:
         self.resize_threshold = 0.75
         self.cache_file = cache_file
 
-        if os.path.exists(self.cache_file):
-            os.remove(self.cache_file)
-            print(f"Removed existing cache file: {self.cache_file}")
-
         self.hash_cache = {}
+        self._load_cache()
+
+    def _load_cache(self):
+        if os.path.exists(self.cache_file):
+            with open(self.cache_file, 'r') as f:
+                self.hash_cache = json.load(f)
+            for key, value in self.hash_cache.items():
+                self._insert(key, value)
 
     def _save_cache(self):
         with open(self.cache_file, 'w') as f:
@@ -69,9 +73,6 @@ class CuckooHash:
         return key, value
 
     def get(self, key):
-        if key in self.hash_cache:
-            return self.hash_cache[key]
-
         h1, h2 = self.hash1(key), self.hash2(key)
 
         if self.table[h1] and self.table[h1][0] == key:
@@ -80,7 +81,7 @@ class CuckooHash:
         if self.table[h2] and self.table[h2][0] == key:
             return self.table[h2][1]
 
-        return None
+        return self.hash_cache.get(key)
 
     def remove(self, key):
         h1, h2 = self.hash1(key), self.hash2(key)
