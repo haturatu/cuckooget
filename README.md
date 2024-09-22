@@ -29,6 +29,8 @@ chmod +x main.py
 
 ## Usage
 ```
+python3 ./main.py
+
 usage: main.py [-h] [-c CONNECTIONS] [-w WEIGHTS [WEIGHTS ...]]
                [-v EXCLUDE [EXCLUDE ...]]
                url output_dir

@@ -1,4 +1,4 @@
-#/usr/bin/pyrhon3
+#/usr/bin/python3
 import argparse
 import asyncio
 from async_web_mirror import AsyncWebMirror
