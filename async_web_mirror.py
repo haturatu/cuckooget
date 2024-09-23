@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import aiohttp
 from aiohttp import ClientSession
 import aiofiles
@@ -7,6 +8,7 @@ from urllib.parse import urljoin, urlparse
 import os
 import xxhash
 from cuckoo_hash import CuckooHash
+from dag import DAG
 
 class AsyncWebMirror:
     def __init__(self, start_url, output_dir, max_connections=50, weights=None, excluded_urls=None):
@@ -14,7 +16,6 @@ class AsyncWebMirror:
         self.output_dir = output_dir
         self.domain = urlparse(start_url).netloc
         self.visited = CuckooHash(10000)
-        self.downloading = CuckooHash(1000)
         self.path_map = CuckooHash(10000)
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
@@ -22,12 +23,14 @@ class AsyncWebMirror:
         self.weights = weights or []
         self.image_semaphore = asyncio.Semaphore(max_connections * 2)
         self.excluded_urls = excluded_urls or []
+        self.dag = DAG()
+        self.lock = asyncio.Lock()
 
     async def download_resource(self, url, session):
-        if self.downloading.get(url):
-            return None, None
+        async with self.lock:
+            if not self.dag.add_node(url):  # DAGにノードを追加できない場合、すでに処理されている
+                return None, None
 
-        self.downloading.insert(url, "True")
         try:
             async with self.semaphore:
                 async with session.get(url, timeout=300) as response:
@@ -47,7 +50,8 @@ class AsyncWebMirror:
             print(f"Error downloading {url}: {e}")
             return None, None
         finally:
-            self.downloading.remove(url)
+            async with self.lock:
+                self.dag.remove_node(url)
 
     def get_file_path(self, url):
         parsed_url = urlparse(url)
@@ -89,6 +93,7 @@ class AsyncWebMirror:
             url = tag.get(attr)
             if url:
                 full_url = urljoin(base_url, url)
+                # URLが既に処理されているか、除外されているかを確認
                 if self.domain in full_url and not self.visited.get(full_url) and not any(excluded in full_url for excluded in self.excluded_urls):
                     priority = self.get_url_priority(full_url)
                     yield priority, full_url, (tag.name, attr)
@@ -96,8 +101,8 @@ class AsyncWebMirror:
     def get_url_priority(self, url):
         for i, weight in enumerate(self.weights):
             if weight in url:
-                return i
-        return len(self.weights)
+                return i  # weightのインデックスを優先度として返す
+        return len(self.weights)  # weightがなければ最低優先度
 
     def get_relative_path(self, from_url, to_url):
         from_path = self.path_map.get(from_url)
@@ -114,9 +119,13 @@ class AsyncWebMirror:
             while not self.task_queue.empty() or tasks:
                 while len(tasks) < self.max_connections and not self.task_queue.empty():
                     _, count, url, tag_info = await self.task_queue.get()
-                    if not self.visited.get(url):
-                        task = asyncio.create_task(self.process_url(url, tag_info, session, count))
-                        tasks.add(task)
+
+                    # 重複防止のため、ここでvisitedに挿入してから処理を進める
+                    async with self.lock:
+                        if not self.visited.get(url):
+                            self.visited.insert(url, "True")  # 訪問済みとしてマーク
+                            task = asyncio.create_task(self.process_url(url, tag_info, session, count))
+                            tasks.add(task)
 
                 if tasks:
                     done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -124,15 +133,10 @@ class AsyncWebMirror:
                         await task
 
     async def process_url(self, url, tag_info, session, count):
-        if self.visited.get(url):
-            return
-
         print(f"Downloading: {url}")
         content, content_type = await self.download_resource(url, session)
         if content is None:
             return
-
-        self.visited.insert(url, "True")
 
         if content_type.startswith('text/html'):
             soup = BeautifulSoup(content, 'html.parser')
@@ -144,7 +148,10 @@ class AsyncWebMirror:
                     img_tasks.append(self.download_and_save_image(img_url, img_tag, session, url))
 
             for priority, new_url, new_tag_info in self.process_links(soup, url):
-                await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
+                async with self.lock:
+                    # 重複チェック＆DAG追加
+                    if self.dag.add_edge(url, new_url) and not self.visited.get(new_url):
+                        await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
 
             for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
                 attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
@@ -177,13 +184,20 @@ class AsyncWebMirror:
 
     async def download_and_save_image(self, img_url, img_tag, session, parent_url):
         async with self.image_semaphore:
-            if not self.visited.get(img_url):
-                img_content, img_content_type = await self.download_resource(img_url, session)
-                if img_content is not None:
-                    img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
-                    new_relative_path = self.get_relative_path(parent_url, img_url)
-                    if new_relative_path:
-                        img_tag['src'] = new_relative_path
-                    else:
-                        img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
+            if self.visited.get(img_url):  # 画像が既に処理されている場合は処理をスキップ
+                return
+            img_content, img_content_type = await self.download_resource(img_url, session)
+            if img_content is not None:
+                # 重複チェック後に保存処理を行う
+                async with self.lock:
+                    if not self.visited.get(img_url):  # 二重チェック
+                        img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
+                        self.visited.insert(img_url, "True")  # ダウンロード済みとして記録
+
+                        # 親URLとの相対パスを取得してimgタグを更新
+                        new_relative_path = self.get_relative_path(parent_url, img_url)
+                        if new_relative_path:
+                            img_tag['src'] = new_relative_path
+                        else:
+                            img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
 
