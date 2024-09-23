@@ -1,6 +1,6 @@
 # cuckooget
 ## What
-A very fast website copy script using a cuckoo hash table. There are still many problems.
+A very fast website copy script using a cuckoo hash table & xxhash & DAG. There are still many problems.
 I feel sad about disappearing websites, and I’m thinking of ways to save them even faster.  
   
 *Websites are our memories.*  
