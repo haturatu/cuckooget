@@ -26,6 +26,12 @@ pip install target/wheels/your_package_name.whl
 
 chmod +x main.py
 ```
+or
+```
+pip install target/wheels/your_package_name.whl --force-reinstall
+
+chmod +x main.py
+```
 
 ## Usage
 ```
