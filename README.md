@@ -1,4 +1,15 @@
 # cuckooget
+```
+                      __                                      __      
+                     /\ \                                    /\ \__   
+  ___   __  __    ___\ \ \/'\     ___     ___      __      __\ \ ,_\  
+ /'___\/\ \/\ \  /'___\ \ , <    / __`\  / __`\  /'_ `\  /'__`\ \ \/  
+/\ \__/\ \ \_\ \/\ \__/\ \ \\`\ /\ \L\ \/\ \L\ \/\ \L\ \/\  __/\ \ \_ 
+\ \____\\ \____/\ \____\\ \_\ \_\ \____/\ \____/\ \____ \ \____\\ \__\
+ \/____/ \/___/  \/____/ \/_/\/_/\/___/  \/___/  \/___L\ \/____/ \/__/
+                                                   /\____/            
+                                                   \_/__/             
+```
 ## What
 A very fast website copy script using a cuckoo hash table & xxhash & DAG. There are still many problems.
 I feel sad about disappearing websites, and I’m thinking of ways to save them even faster.  
