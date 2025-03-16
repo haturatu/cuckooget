@@ -2,3 +2,4 @@ aiofiles==24.1.0
 aiohttp==3.10.3
 beautifulsoup4==4.12.3
 xxhash==3.5.0
+ujson
