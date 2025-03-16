@@ -42,7 +42,7 @@ class AsyncWebMirror:
                     self.visited.insert(url, "True")
                     self.path_map.insert(url, path)
                     # 新しいデータ構造にも追加
-                    self.visited_urls.add(url)
+                    #self.visited_urls.add(url)
                     self.url_to_path[url] = path
 
     def save_state(self):
@@ -125,6 +125,15 @@ class AsyncWebMirror:
 
     async def save_resource(self, url, content, content_type):
         file_path = self.get_file_path(url)
+        parent_dir = os.path.dirname(file_path)
+
+        # 親ディレクトリがファイルでないか確認
+        if os.path.exists(parent_dir) and not os.path.isdir(parent_dir):
+            # ファイルが存在する場合、リネームしてディレクトリを作成
+            new_name = f"{parent_dir}_{xxhash.xxh32(parent_dir.encode()).hexdigest()[:8]}"
+            os.rename(parent_dir, new_name)
+            print(f"Renamed existing file to: {new_name}")
+
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         mode = 'w' if content_type.startswith('text') else 'wb'
@@ -294,4 +303,5 @@ class AsyncWebMirror:
                             img_tag['src'] = new_relative_path
                         else:
                             img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
+
 
