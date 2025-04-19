@@ -26,7 +26,12 @@ It consists of xxh32 and xxh64 as different hash values.
 ## Install
 deps
 ```
-pip install maturin
+curl https://pyenv.run | bash
+
+pyenv install 3.13.2
+pyenv virtualenv 3.13.2 ck
+pyenv activate ck
+
 pip install -r requirements.txt
 ```
 

@@ -8,6 +8,8 @@ import os
 import xxhash
 from cuckoo_nest import CuckooHash, DAG
 import ujson
+import json
+import time
 
 class AsyncWebMirror:
     def __init__(self, start_url, output_dir, max_connections=50, weights=None, excluded_urls=None):
@@ -16,8 +18,9 @@ class AsyncWebMirror:
         self.domain = urlparse(start_url).netloc
         self.visited = CuckooHash(100000)
         self.path_map = CuckooHash(100000)
-        self.visited_urls = set()  # CuckooHashの代わりに通常のセットを使用して訪問済みURLを記録
-        self.url_to_path = {}  # URLとパスのマッピングを保持
+        self.visited_urls = set()
+        self.completed_urls = set()
+        self.url_to_path = {}
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
         self.task_queue = asyncio.PriorityQueue()
@@ -27,39 +30,109 @@ class AsyncWebMirror:
         self.dag = DAG()
         self.lock = asyncio.Lock()
         self.session = None
-        self.processed_count = 0  # ダウンロード処理回数をカウント
-
-        # 保存済みの状態を読み込む
+        self.processed_count = 0
+        self.state_save_interval = 5
+        self.last_state_save_time = time.time()
+        self.state_save_time_interval = 30
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # State file paths
+        self.state_file = os.path.join(self.output_dir, "state.json")
+        self.temp_state_file = os.path.join(self.output_dir, "state.json.tmp")
+        self.completion_flag_file = os.path.join(self.output_dir, "COMPLETE")
+        
+        # Load previous state
         self.load_state()
 
     def load_state(self):
-        """保存済みの状態をファイルから読み込む"""
-        state_file = os.path.join(self.output_dir, "state")
-        if os.path.exists(state_file):
-            with open(state_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    url, path = line.strip().split(" ", 1)
-                    self.visited.insert(url, "True")
-                    self.path_map.insert(url, path)
-                    # 新しいデータ構造にも追加
-                    #self.visited_urls.add(url)
-                    self.url_to_path[url] = path
-
-    def save_state(self):
-        """現在の状態をファイルに保存する"""
-        state_file = os.path.join(self.output_dir, "state")
-        print(f"Saving state to: {state_file}")  # 保存先を出力
+        """Load previous download state"""
+        # Check if the download was completed previously
+        if os.path.exists(self.completion_flag_file):
+            print("Previous download was completed successfully.")
+            return
+            
+        if not os.path.exists(self.state_file):
+            print("No previous state found. Starting fresh download.")
+            return
+            
         try:
-            with open(state_file, "w", encoding="utf-8") as f:
-                # 新しいデータ構造からデータを保存
-                for url, path in self.url_to_path.items():
-                    f.write(f"{url} {path}\n")
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+                
+            # Load URL mappings
+            self.url_to_path = state_data.get('url_to_path', {})
+            
+            # Load sets of visited and completed URLs
+            self.visited_urls = set(state_data.get('visited_urls', []))
+            self.completed_urls = set(state_data.get('completed_urls', []))
+            
+            # Update CuckooHash structures
+            for url, path in self.url_to_path.items():
+                self.visited.insert(url, "True")
+                self.path_map.insert(url, path)
+                
+            print(f"Loaded previous state: {len(self.visited_urls)} visited URLs, {len(self.completed_urls)} completed.")
+            
+            # Identify URLs that were visited but not completed
+            pending_urls = self.visited_urls - self.completed_urls
+            if pending_urls:
+                print(f"Found {len(pending_urls)} URLs that need to be reprocessed.")
+        except Exception as e:
+            print(f"Error loading previous state: {e}")
+            # If state is corrupted, start fresh
+            self.url_to_path = {}
+            self.visited_urls = set()
+            self.completed_urls = set()
+
+    def save_state(self, force=False):
+        """Save current download state to a file"""
+        current_time = time.time()
+        
+        # Save state if forced, or if processed_count is a multiple of state_save_interval,
+        # or if enough time has passed since the last save
+        if (not force and 
+            self.processed_count % self.state_save_interval != 0 and
+            current_time - self.last_state_save_time < self.state_save_time_interval):
+            return
+            
+        self.last_state_save_time = current_time
+            
+        try:
+            # First write to a temporary file
+            state_data = {
+                'url_to_path': self.url_to_path,
+                'visited_urls': list(self.visited_urls),
+                'completed_urls': list(self.completed_urls)
+            }
+            
+            with open(self.temp_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f)
+                
+            # Then rename to the actual state file (atomic operation)
+            os.replace(self.temp_state_file, self.state_file)
+            
+            if force:
+                print(f"State saved: {len(self.visited_urls)} visited, {len(self.completed_urls)} completed.")
         except Exception as e:
             print(f"Error saving state: {e}")
 
+    def mark_download_complete(self):
+        """Mark the download as completely finished"""
+        # Save final state
+        self.save_state(force=True)
+        
+        # Create completion flag file
+        with open(self.completion_flag_file, 'w', encoding='utf-8') as f:
+            f.write(f"Download completed at {time.ctime()}\n")
+            f.write(f"Total URLs processed: {len(self.completed_urls)}")
+            
+        print(f"Download marked as complete. Total URLs: {len(self.completed_urls)}")
+
     async def download_resource(self, url):
         async with self.lock:
-            if not self.dag.add_node(url):  # DAGにノードを追加できない場合、すでに処理されている
+            if not self.dag.add_node(url):  # DAG node already exists
                 return None, None
 
         max_retries = 5
@@ -68,7 +141,7 @@ class AsyncWebMirror:
         for attempt in range(max_retries):
             try:
                 async with self.semaphore:
-                    async with self.session.get(url, timeout=300) as response:
+                    async with self.session.get(url, timeout=3) as response:
                         if response.status == 200:
                             content_type = response.headers.get('content-type', '').split(';')[0]
                             if content_type.startswith('text') or url.endswith(('.php', '.pl')):
@@ -89,11 +162,22 @@ class AsyncWebMirror:
                             return None, None
             except asyncio.TimeoutError:
                 print(f"Timeout error for {url}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
             except aiohttp.ClientPayloadError as e:
                 print(f"Payload error for {url}: {e}")
-                return None, None
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
             except Exception as e:
                 print(f"Error downloading {url}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
             finally:
                 async with self.lock:
                     self.dag.remove_node(url)
@@ -114,8 +198,8 @@ class AsyncWebMirror:
             base, ext = os.path.splitext(path)
             path = f"{base}_{query_hash}{ext}"
 
-        # ファイル名が長すぎる場合、ハッシュ化して短縮する
-        max_filename_length = 255  # FSの制限
+        # Handle filename length limits
+        max_filename_length = 255  # Filesystem limit
         if len(os.path.basename(path)) > max_filename_length:
             filename_hash = xxhash.xxh32(path.encode()).hexdigest()[:16]
             base, ext = os.path.splitext(path)
@@ -127,9 +211,8 @@ class AsyncWebMirror:
         file_path = self.get_file_path(url)
         parent_dir = os.path.dirname(file_path)
 
-        # 親ディレクトリがファイルでないか確認
+        # Handle case where parent directory exists as a file
         if os.path.exists(parent_dir) and not os.path.isdir(parent_dir):
-            # ファイルが存在する場合、リネームしてディレクトリを作成
             new_name = f"{parent_dir}_{xxhash.xxh32(parent_dir.encode()).hexdigest()[:8]}"
             os.rename(parent_dir, new_name)
             print(f"Renamed existing file to: {new_name}")
@@ -139,21 +222,21 @@ class AsyncWebMirror:
         mode = 'w' if content_type.startswith('text') else 'wb'
         encoding = 'utf-8' if content_type.startswith('text') else None
 
-        # 既にファイルが存在する場合でも、visitedとpath_mapを更新
+        # If file already exists, update mappings but don't rewrite
         if os.path.exists(file_path):
             print(f"File already exists: {file_path}")
             relative_path = os.path.relpath(file_path, self.output_dir)
             self.visited.insert(url, "True")
             self.path_map.insert(url, relative_path)
-            # 新しいデータ構造も更新
-            self.visited_urls.add(url)
             self.url_to_path[url] = relative_path
-
-            # ダウンロード処理回数をカウントし、10回ごとに状態を保存
+            
+            # Mark as completed
+            self.completed_urls.add(url)
+            
+            # Update counters and save state if needed
             self.processed_count += 1
-            if self.processed_count % 10 == 0:
-                self.save_state()
-
+            self.save_state()
+            
             return relative_path
 
         try:
@@ -166,14 +249,14 @@ class AsyncWebMirror:
         relative_path = os.path.relpath(file_path, self.output_dir)
         self.visited.insert(url, "True")
         self.path_map.insert(url, relative_path)
-        # 新しいデータ構造も更新
-        self.visited_urls.add(url)
         self.url_to_path[url] = relative_path
-
-        # ダウンロード処理回数をカウントし、10回ごとに状態を保存
+        
+        # Mark as completed
+        self.completed_urls.add(url)
+        
+        # Update counters and save state if needed
         self.processed_count += 1
-        if self.processed_count % 10 == 0:
-            self.save_state()
+        self.save_state()
 
         return relative_path
 
@@ -182,11 +265,13 @@ class AsyncWebMirror:
         for tag in soup.find_all(['a', 'link', 'script', 'img']):
             attr = 'href' if tag.name in ['a', 'link'] else 'src'
             url = tag.get(attr)
-            # URLが既に処理されているか、除外されているかを確認
             if url:
+                if url.startswith('#'):
+                    continue
                 full_url = urljoin(base_url, url)
-                # 新しいデータ構造を使用
-                if self.domain in full_url and full_url not in self.visited_urls and not any(excluded in full_url for excluded in self.excluded_urls):
+                if (self.domain in full_url and 
+                    full_url not in self.visited_urls and 
+                    not any(excluded in full_url for excluded in self.excluded_urls)):
                     priority = self.get_url_priority(full_url)
                     links.append((priority, full_url, (tag.name, attr)))
         return links
@@ -194,11 +279,10 @@ class AsyncWebMirror:
     def get_url_priority(self, url):
         for i, weight in enumerate(self.weights):
             if weight in url:
-                return i  # weightのインデックスを優先度として返す
-        return len(self.weights)  # weightがなければ最低優先度
+                return i  # Lower index = higher priority
+        return len(self.weights)  # Default lowest priority
 
     def get_relative_path(self, from_url, to_url):
-        # 新しいデータ構造からパスを取得
         from_path = self.url_to_path.get(from_url)
         to_path = self.url_to_path.get(to_url)
         if from_path and to_path:
@@ -206,54 +290,102 @@ class AsyncWebMirror:
         return None
 
     async def mirror_site(self):
-        await self.task_queue.put((0, 0, self.start_url, None))
+        # Check if download was previously completed
+        if os.path.exists(self.completion_flag_file):
+            print("Download was already completed. Use --force to download again.")
+            return
+            
+        # Add pending URLs from previous run to the queue first
+        pending_urls = self.visited_urls - self.completed_urls
+        if pending_urls:
+            print(f"Resuming download of {len(pending_urls)} pending URLs")
+            for url in pending_urls:
+                priority = self.get_url_priority(url)
+                await self.task_queue.put((priority, 0, url, None))
 
-        async with aiohttp.ClientSession(json_serialize=ujson.dumps) as self.session:
+        # Add start URL if not already in the queue
+        if not pending_urls or self.start_url not in self.visited_urls:
+            await self.task_queue.put((0, 0, self.start_url, None))
+
+        # Create client session with optimal settings
+        connector = aiohttp.TCPConnector(limit=self.max_connections, ttl_dns_cache=300)
+        timeout = aiohttp.ClientTimeout(total=600)  # 10 minutes total timeout
+        
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            json_serialize=ujson.dumps
+        ) as self.session:
             tasks = set()
-            while not self.task_queue.empty() or tasks:
-                while len(tasks) < self.max_connections and not self.task_queue.empty():
-                    _, count, url, tag_info = await self.task_queue.get()
+            try:
+                while not self.task_queue.empty() or tasks:
+                    # Process URLs while maintaining concurrency limits
+                    while len(tasks) < self.max_connections and not self.task_queue.empty():
+                        _, count, url, tag_info = await self.task_queue.get()
 
-                    # 重複防止のため、ここでvisitedに挿入してから処理を進める
-                    async with self.lock:
-                        # 新しいデータ構造を使用して確認
-                        if url not in self.visited_urls:
-                            self.visited.insert(url, "True")  # CuckooHashにも保存
-                            self.visited_urls.add(url)  # 新しいデータ構造に追加
+                        # Avoid reprocessing already completed URLs
+                        if url in self.completed_urls:
+                            continue
+                            
+                        async with self.lock:
+                            # Mark as visited before processing
+                            if url not in self.visited_urls:
+                                self.visited.insert(url, "True")
+                                self.visited_urls.add(url)
+                                self.save_state()  # Save state when adding new URLs
+                            
                             task = asyncio.create_task(self.process_url(url, tag_info, count))
                             tasks.add(task)
 
-                if tasks:
-                    done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                    for task in done:
-                        await task
+                    if tasks:
+                        # Wait for at least one task to complete
+                        done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                        for task in done:
+                            try:
+                                await task
+                            except Exception as e:
+                                print(f"Task error: {e}")
+            except KeyboardInterrupt:
+                print("Download interrupted. Progress saved. You can resume later.")
+                # Ensure state is saved on keyboard interrupt
+                self.save_state(force=True)
+                return
+            except Exception as e:
+                print(f"Error during mirroring: {e}")
+                # Ensure state is saved on error
+                self.save_state(force=True)
+                raise
 
-        # 状態を保存
-        self.save_state()
+        # Mark download as complete
+        self.mark_download_complete()
 
     async def process_url(self, url, tag_info, count):
         print(f"Downloading: {url}")
         content, content_type = await self.download_resource(url)
         if content is None:
+            # If download failed, don't mark as completed but still as visited
+            print(f"Failed to download: {url}")
             return
 
         if content_type.startswith('text/html'):
             soup = BeautifulSoup(content, 'html.parser')
 
+            # Collect and process image tasks
             img_tasks = []
             for img_tag in soup.find_all('img', src=True):
                 img_url = urljoin(url, img_tag['src'])
-                # 新しいデータ構造を使用して確認
-                if img_url not in self.visited_urls:
+                if img_url not in self.visited_urls and img_url not in self.completed_urls:
                     img_tasks.append(self.download_and_save_image(img_url, img_tag, url))
 
+            # Process links and add to queue
             links = self.process_links(soup, url)
             async with self.lock:
                 for priority, new_url, new_tag_info in links:
-                    # 新しいデータ構造を使用して確認
                     if self.dag.add_edge(url, new_url) and new_url not in self.visited_urls:
                         await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
+                        self.visited_urls.add(new_url)  # Mark as visited when adding to queue
 
+            # Rewrite links to use relative paths
             for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
                 attr = 'href' if new_tag.name in ['a', 'link'] else 'src'
                 if new_tag.get(attr):
@@ -265,16 +397,21 @@ class AsyncWebMirror:
                         new_path = os.path.relpath(self.get_file_path(new_full_url), os.path.dirname(self.get_file_path(url)))
                         new_tag[attr] = new_path
 
+            # Special handling for PHP/PL links
             for a_tag in soup.find_all('a', href=True):
                 if a_tag['href'].endswith(('.php', '.pl')):
                     a_tag['href'] = a_tag['href'].rsplit('.', 1)[0] + '.html'
 
+            # Wait for all image tasks to complete
             await asyncio.gather(*img_tasks)
 
+            # Update content with modified soup
             content = str(soup)
 
+        # Save the resource
         relative_path = await self.save_resource(url, content, content_type)
 
+        # Update tag if needed
         if tag_info and self.weights:
             tag_name, attr = tag_info
             soup = BeautifulSoup('', 'html.parser')
@@ -284,24 +421,25 @@ class AsyncWebMirror:
 
     async def download_and_save_image(self, img_url, img_tag, parent_url):
         async with self.image_semaphore:
-            # 新しいデータ構造を使用して確認
-            if img_url in self.visited_urls:  # 画像が既に処理されている場合は処理をスキップ
+            # Skip if already processed
+            if img_url in self.visited_urls:
                 return
+                
+            # Mark as visited
+            async with self.lock:
+                self.visited_urls.add(img_url)
+                self.visited.insert(img_url, "True")
+            
+            # Download and save
             img_content, img_content_type = await self.download_resource(img_url)
             if img_content is not None:
-                # 重複チェック後に保存処理を行う
-                async with self.lock:
-                    # 新しいデータ構造を使用して確認
-                    if img_url not in self.visited_urls:  # 二重チェック
-                        img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
-                        self.visited.insert(img_url, "True")  # CuckooHashにも保存
-                        self.visited_urls.add(img_url)  # 新しいデータ構造に追加
-
-                        # 親URLとの相対パスを取得してimgタグを更新
-                        new_relative_path = self.get_relative_path(parent_url, img_url)
-                        if new_relative_path:
-                            img_tag['src'] = new_relative_path
-                        else:
-                            img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
-
+                # Save the image
+                img_relative_path = await self.save_resource(img_url, img_content, img_content_type)
+                
+                # Update the img tag
+                new_relative_path = self.get_relative_path(parent_url, img_url)
+                if new_relative_path:
+                    img_tag['src'] = new_relative_path
+                else:
+                    img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
 
