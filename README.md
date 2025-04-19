@@ -51,9 +51,22 @@ chmod +x main.py
 
 ## Usage
 ```
-python3 ./main.py
+$ python3 main.py -h
+usage: main.py [-h] [-c CONNECTIONS] [-w WEIGHTS [WEIGHTS ...]] [-v EXCLUDE [EXCLUDE ...]] [-f] url output_dir
 
-usage: main.py [-h] [-c CONNECTIONS] [-w WEIGHTS [WEIGHTS ...]]
-               [-v EXCLUDE [EXCLUDE ...]]
-               url output_dir
+Mirrors a website.
+
+positional arguments:
+  url                   URL of the website to mirror
+  output_dir            Directory to save the mirrored files
+
+options:
+  -h, --help            show this help message and exit
+  -c, --connections CONNECTIONS
+                        Number of simultaneous connections (default: 50)
+  -w, --weights WEIGHTS [WEIGHTS ...]
+                        Strings to set URL priorities (can specify multiple separated by spaces)
+  -v, --exclude EXCLUDE [EXCLUDE ...]
+                        URL patterns to exclude (can specify multiple separated by spaces)
+  -f, --force           Force re-download even if the download was already completed
 ```
