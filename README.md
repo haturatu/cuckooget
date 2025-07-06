@@ -30,8 +30,8 @@ deps
 ```
 curl https://pyenv.run | bash
 
-pyenv install 3.13.2
-pyenv virtualenv 3.13.2 ck
+pyenv install 3.12.3
+pyenv virtualenv 3.12.3 ck
 pyenv activate ck
 
 pip install -r requirements.txt
