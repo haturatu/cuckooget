@@ -8,6 +8,6 @@ name = "cuckoo_nest"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.18", features = ["extension-module"] }
+pyo3 = { version = "0.25.1", features = ["extension-module"] }
 rand = "0.8.5"
 xxhash-rust = { version = "0.8", features = ["xxh32", "xxh64"] }
