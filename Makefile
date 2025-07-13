@@ -6,9 +6,9 @@ EGG_INFO  = cuckooget.egg-info src/cuckooget.egg-info
 all: check-deps build
 
 check-deps:
-	@command -v pyenv >/dev/null || (echo "Please install pyenv" && exit 1)
-	@command -v python3 >/dev/null || (echo "Please install Python3" && exit 1)
-	@command -v maturin >/dev/null || { echo "Please install maturin (pip install maturin)"; exit 1; }
+	@command -v pyenv >/dev/null || (echo "Please install pyenv" ; exit 1;)
+	@command -v python3 >/dev/null || (echo "Please install Python3" ; exit 1;)
+	@command -v maturin >/dev/null || ( echo "Please install maturin (pip install maturin)"; exit 1; )
 
 build:
 	@echo "Building with maturin..."
