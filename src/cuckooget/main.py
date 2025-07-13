@@ -2,9 +2,9 @@
 import argparse
 import asyncio
 import os
-from async_web_mirror import AsyncWebMirror
+from .async_web_mirror import AsyncWebMirror
 
-async def main():
+async def main_async():
     parser = argparse.ArgumentParser(description='Mirrors a website.')
     parser.add_argument('url', help='URL of the website to mirror')
     parser.add_argument('output_dir', help='Directory to save the mirrored files')
@@ -30,6 +30,8 @@ async def main():
         print(f"\nAn error occurred: {e}")
         print("Progress has been saved and can be resumed later.")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def main():
+    asyncio.run(main_async())
 
+if __name__ == "__main__":
+    main()

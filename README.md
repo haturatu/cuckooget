@@ -31,30 +31,26 @@ deps
 curl https://pyenv.run | bash
 
 pyenv install 3.12.3
-pyenv virtualenv 3.12.3 ck
-pyenv activate ck
-
-pip install -r requirements.txt
+```
+### GNU Make
+I recommend installing it using GNU Make.  
+```bash
+make
+make install
 ```
 
-You can build the CuckooHashtables implemented in Rust and install it using pip. This will allow you to call it from your Python code. If you prefer not to install it globally, you can also install it from within a virtual environment.
-```
-maturin build
-pip install target/wheels/your_package_name.whl
-
-chmod +x main.py
-```
-or
-```
-pip install target/wheels/your_package_name.whl --force-reinstall
-
-chmod +x main.py
+### Bash
+```bash
+chmod +x install.sh
+./install.sh
 ```
 
 ## Usage
 ```
-$ python3 main.py -h
-usage: main.py [-h] [-c CONNECTIONS] [-w WEIGHTS [WEIGHTS ...]] [-v EXCLUDE [EXCLUDE ...]] [-f] url output_dir
+$ ck -h
+usage: ck [-h] [-c CONNECTIONS] [-w WEIGHTS [WEIGHTS ...]] [-v EXCLUDE [EXCLUDE ...]]
+          [-f]
+          url output_dir
 
 Mirrors a website.
 
@@ -64,11 +60,13 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -c, --connections CONNECTIONS
+  -c CONNECTIONS, --connections CONNECTIONS
                         Number of simultaneous connections (default: 50)
-  -w, --weights WEIGHTS [WEIGHTS ...]
-                        Strings to set URL priorities (can specify multiple separated by spaces)
-  -v, --exclude EXCLUDE [EXCLUDE ...]
-                        URL patterns to exclude (can specify multiple separated by spaces)
+  -w WEIGHTS [WEIGHTS ...], --weights WEIGHTS [WEIGHTS ...]
+                        Strings to set URL priorities (can specify multiple separated
+                        by spaces)
+  -v EXCLUDE [EXCLUDE ...], --exclude EXCLUDE [EXCLUDE ...]
+                        URL patterns to exclude (can specify multiple separated by
+                        spaces)
   -f, --force           Force re-download even if the download was already completed
 ```
