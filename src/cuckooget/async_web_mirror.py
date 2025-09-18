@@ -1,6 +1,5 @@
 import asyncio
-import aiohttp
-from aiohttp import ClientSession
+from curl_cffi import AsyncSession
 import aiofiles
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -141,33 +140,27 @@ class AsyncWebMirror:
         for attempt in range(max_retries):
             try:
                 async with self.semaphore:
-                    async with self.session.get(url, timeout=3) as response:
-                        if response.status == 200:
-                            content_type = response.headers.get('content-type', '').split(';')[0]
-                            if content_type.startswith('text') or url.endswith(('.php', '.pl')):
-                                return await response.text(), 'text/html'
-                            else:
-                                return await response.read(), content_type
-                        elif 500 <= response.status < 600:
-                            if attempt < max_retries - 1:
-                                print(f"Retrying {url} due to status {response.status} (attempt {attempt + 1})")
-                                await asyncio.sleep(retry_delay)
-                                retry_delay *= 2
-                                continue
-                            else:
-                                print(f"Failed to download {url} after {max_retries} attempts: Status {response.status}")
-                                return None, None
+                    response = await self.session.get(url, impersonate="chrome110", timeout=3)
+                    if response.status_code == 200:
+                        content_type = response.headers.get('content-type', '').split(';')[0]
+                        if content_type.startswith('text') or url.endswith(('.php', '.pl')):
+                            return response.text, 'text/html'
                         else:
-                            print(f"Error downloading {url}: Status {response.status}")
+                            return response.content, content_type
+                    elif 500 <= response.status_code < 600:
+                        if attempt < max_retries - 1:
+                            print(f"Retrying {url} due to status {response.status_code} (attempt {attempt + 1})")
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2
+                            continue
+                        else:
+                            print(f"Failed to download {url} after {max_retries} attempts: Status {response.status_code}")
                             return None, None
+                    else:
+                        print(f"Error downloading {url}: Status {response.status_code}")
+                        return None, None
             except asyncio.TimeoutError:
                 print(f"Timeout error for {url}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-            except aiohttp.ClientPayloadError as e:
-                print(f"Payload error for {url}: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
@@ -307,15 +300,8 @@ class AsyncWebMirror:
         if not pending_urls or self.start_url not in self.visited_urls:
             await self.task_queue.put((0, 0, self.start_url, None))
 
-        # Create client session with optimal settings
-        connector = aiohttp.TCPConnector(limit=self.max_connections, ttl_dns_cache=300)
-        timeout = aiohttp.ClientTimeout(total=600)  # 10 minutes total timeout
-        
-        async with aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            json_serialize=ujson.dumps
-        ) as self.session:
+        async with AsyncSession() as session:
+            self.session = session
             tasks = set()
             try:
                 while not self.task_queue.empty() or tasks:
@@ -326,16 +312,19 @@ class AsyncWebMirror:
                         # Avoid reprocessing already completed URLs
                         if url in self.completed_urls:
                             continue
+
+                        # Avoid processing already visited urls
+                        if url in self.visited_urls:
+                            continue
                             
                         async with self.lock:
                             # Mark as visited before processing
-                            if url not in self.visited_urls:
-                                self.visited.insert(url, "True")
-                                self.visited_urls.add(url)
-                                self.save_state()  # Save state when adding new URLs
-                            
-                            task = asyncio.create_task(self.process_url(url, tag_info, count))
-                            tasks.add(task)
+                            self.visited.insert(url, "True")
+                            self.visited_urls.add(url)
+                            self.save_state()  # Save state when adding new URLs
+                        
+                        task = asyncio.create_task(self.process_url(url, tag_info, count))
+                        tasks.add(task)
 
                     if tasks:
                         # Wait for at least one task to complete
@@ -383,7 +372,6 @@ class AsyncWebMirror:
                 for priority, new_url, new_tag_info in links:
                     if self.dag.add_edge(url, new_url) and new_url not in self.visited_urls:
                         await self.task_queue.put((priority, count + 1, new_url, new_tag_info))
-                        self.visited_urls.add(new_url)  # Mark as visited when adding to queue
 
             # Rewrite links to use relative paths
             for new_tag in soup.find_all(['a', 'link', 'img', 'script']):
@@ -442,4 +430,3 @@ class AsyncWebMirror:
                     img_tag['src'] = new_relative_path
                 else:
                     img_tag['src'] = os.path.relpath(self.get_file_path(img_url), os.path.dirname(self.get_file_path(parent_url)))
-

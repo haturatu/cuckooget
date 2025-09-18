@@ -1,4 +1,4 @@
-aiohttp
+curl_cffi
 aiofiles
 beautifulsoup4
 xxhash
