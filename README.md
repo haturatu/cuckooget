@@ -37,11 +37,12 @@ git checkout feat/curl-impersonate
 make && make install
 ```
 
-deps
+deps: 
 ```
 curl https://pyenv.run | bash
 
 pyenv install 3.12.3
+pip install marutin
 ```
 ### GNU Make
 I recommend installing it using GNU Make.  
