@@ -8,66 +8,88 @@ import os
 import xxhash
 from cuckoo_nest import CuckooHash, DAG
 import ujson
-import json
 import time
+import sqlite3
+import hashlib
 
 class URLState:
-    """Manages the state of URLs: visited, completed, and path mappings."""
-    def __init__(self, output_dir):
+    """Manages the state of URLs using a SQLite database."""
+    def __init__(self, output_dir, start_url):
         self.output_dir = output_dir
         self.lock = asyncio.Lock()
 
-        # --- State data structures ---
+        # --- State data structures (in-memory cache) ---
         self.visited = CuckooHash(100000)
         self.path_map = CuckooHash(100000)
         self.completed_urls = set()
         self.url_to_path = {}
 
-        # --- State file paths ---
-        self.state_file = os.path.join(self.output_dir, "state.json")
-        self.temp_state_file = os.path.join(self.output_dir, "state.json.tmp")
+        # --- Database setup ---
+        db_dir = "/tmp/ck/"
+        os.makedirs(db_dir, exist_ok=True)
+        db_filename = hashlib.sha256(start_url.encode()).hexdigest() + ".sqlite"
+        self.db_path = os.path.join(db_dir, db_filename)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._create_tables()
+
+        # --- Completion flag ---
         self.completion_flag_file = os.path.join(self.output_dir, "COMPLETE")
 
         # Load previous state on initialization
         self.load_state()
 
+    def __del__(self):
+        """Ensure the database connection is closed when the object is destroyed."""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
+
+    def _create_tables(self):
+        """Create database tables if they don't exist."""
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS url_to_path (
+                    url TEXT PRIMARY KEY,
+                    path TEXT
+                )
+            """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS completed_urls (
+                    url TEXT PRIMARY KEY
+                )
+            """)
+
     def load_state(self):
-        """Load previous download state from file."""
-        # Check if the download was completed previously
+        """Load previous download state from the database."""
         if os.path.exists(self.completion_flag_file):
             print("Previous download was completed successfully.")
             return
-            
-        if not os.path.exists(self.state_file):
-            print("No previous state found. Starting fresh download.")
-            return
-            
+
         try:
-            with open(self.state_file, 'r', encoding='utf-8') as f:
-                state_data = json.load(f)
+            with self.conn:
+                # Load URL mappings
+                for url, path in self.conn.execute("SELECT url, path FROM url_to_path"):
+                    self.url_to_path[url] = path
                 
-            # Load URL mappings
-            self.url_to_path = state_data.get('url_to_path', {})
-            # Load set of completed URLs
-            self.completed_urls = set(state_data.get('completed_urls', []))
-            
+                # Load set of completed URLs
+                for url, in self.conn.execute("SELECT url FROM completed_urls"):
+                    self.completed_urls.add(url)
+
             # Update CuckooHash structures from the loaded state
             for url, path in self.url_to_path.items():
                 self.visited.insert(url, "True")
-                self.path_map.insert(url, path)
-                
+                if path:
+                    self.path_map.insert(url, path)
+            
             print(f"Loaded previous state: {len(self.url_to_path)} visited URLs, {len(self.completed_urls)} completed.")
         except Exception as e:
-            # If state is corrupted, start fresh
             print(f"Error loading previous state: {e}. Starting fresh.")
             self.url_to_path = {}
             self.completed_urls = set()
 
     async def save_state(self, force=False, processed_count=0, last_save_time=0):
-        """Save current download state to a file atomically."""
+        """Commit transactions to the database."""
         current_time = time.time()
         
-        # Save state only if forced, or at specific intervals to avoid performance issues
         if (not force and 
             processed_count % 5 != 0 and
             current_time - last_save_time < 30):
@@ -75,20 +97,7 @@ class URLState:
 
         async with self.lock:
             try:
-                state_data = {
-                    'url_to_path': self.url_to_path,
-                    # Visited URLs are derived from the keys of url_to_path to reduce data duplication
-                    'visited_urls': list(self.url_to_path.keys()),
-                    'completed_urls': list(self.completed_urls)
-                }
-                
-                # First write to a temporary file
-                with open(self.temp_state_file, 'w', encoding='utf-8') as f:
-                    json.dump(state_data, f)
-                    
-                # Then rename to the actual state file (atomic operation)
-                os.replace(self.temp_state_file, self.state_file)
-                
+                self.conn.commit()
                 if force:
                     print(f"State saved: {len(self.url_to_path)} visited, {len(self.completed_urls)} completed.")
                 return True, current_time
@@ -98,14 +107,13 @@ class URLState:
 
     async def mark_download_complete(self):
         """Mark the download as completely finished."""
-        # The final state is saved by the finally block in mirror_site.
-        # This method is only responsible for creating the completion flag.
-
-        # Create completion flag file
+        self.conn.commit() # Final commit
+        if self.conn:
+            self.conn.close()
+            self.conn = None # Prevent further use
         with open(self.completion_flag_file, 'w', encoding='utf-8') as f:
             f.write(f"Download completed at {time.ctime()}\n")
             f.write(f"Total URLs processed: {len(self.completed_urls)}")
-            
         print(f"Download marked as complete. Total URLs: {len(self.completed_urls)}")
 
     def is_download_completed(self):
@@ -125,9 +133,9 @@ class URLState:
         async with self.lock:
             if self.visited.get(url) is None:
                 self.visited.insert(url, "True")
-                # Add to url_to_path immediately to mark as visited
-                if url not in self.url_to_path:
-                    self.url_to_path[url] = "" # Placeholder path until saved
+                self.url_to_path[url] = "" # In-memory update
+                with self.conn:
+                    self.conn.execute("INSERT OR IGNORE INTO url_to_path (url, path) VALUES (?, ?)", (url, ""))
                 return True
             return False
 
@@ -137,6 +145,9 @@ class URLState:
             self.path_map.insert(url, path)
             self.url_to_path[url] = path
             self.completed_urls.add(url)
+            with self.conn:
+                self.conn.execute("UPDATE url_to_path SET path = ? WHERE url = ?", (path, url))
+                self.conn.execute("INSERT OR IGNORE INTO completed_urls (url) VALUES (?)", (url,))
 
     async def get_path(self, url):
         async with self.lock:
@@ -155,7 +166,7 @@ class AsyncWebMirror:
         os.makedirs(self.output_dir, exist_ok=True)
         
         # --- State and DAG Management ---
-        self.state = URLState(self.output_dir)
+        self.state = URLState(self.output_dir, self.start_url)
         self.dag = DAG()
         self.dag_lock = asyncio.Lock() # Lock specifically for DAG operations
 
