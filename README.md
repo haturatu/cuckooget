@@ -98,7 +98,7 @@ graph TD
         C -- "uses for URL priority" --> F;
     end
 
-    subgraph Rust Extension (cuckoo_nest.so)
+    subgraph rust_ext ["Rust Extension (cuckoo_nest.so)"]
         E[CuckooHash Module];
         F[DAG Module];
     end
@@ -108,5 +108,5 @@ graph TD
 
     style User Interface fill:#c9f,stroke:#333,stroke-width:2px
     style Python Core fill:#9cf,stroke:#333,stroke-width:2px
-    style Rust Extension (cuckoo_nest.so) fill:#f96,stroke:#333,stroke-width:2px
+    style rust_ext fill:#f96,stroke:#333,stroke-width:2px
 ```
