@@ -26,11 +26,23 @@ It consists of xxh32 and xxh64 as different hash values.
 DeepWiki: [https://deepwiki.com/haturatu/cuckooget](https://deepwiki.com/haturatu/cuckooget)
   
 ## Install
-deps
+
+### Experimental: `curl-impersonate` support
+This version uses `curl-impersonate` to avoid getting blocked by websites. It mimics the TLS/JA3 fingerprint of a real browser.
+
+To use this feature, please checkout the `feat/curl-impersonate` branch.
+
+```bash
+git checkout feat/curl-impersonate
+make && make install
+```
+
+deps: 
 ```
 curl https://pyenv.run | bash
 
 pyenv install 3.12.3
+pip install marutin
 ```
 ### GNU Make
 I recommend installing it using GNU Make.  
