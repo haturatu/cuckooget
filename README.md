@@ -1,20 +1,20 @@
 # cuckooget
-```
+
                       __                                      __      
-                     /\ \                                    /\ \__   
+                     /\ \                                    /\ \__   
   ___   __  __    ___\ \ \/'\     ___     ___      __      __\ \ ,_\  
  /'___\/\ \/\ \  /'___\ \ , <    / __`\  / __`\  /'_ `\  /'__`\ \ \/  
-/\ \__/\ \ \_\ \/\ \__/\ \ \\`\ /\ \L\ \/\ \L\ \/\ \L\ \/\  __/\ \ \_ 
+/\ \__/\ \_\ \/\ \__/ \ \ \`\/\ \L\ \/\ \L\ \/\ \L\ \/\  __/\ \ \_ 
 \ \____\\ \____/\ \____\\ \_\ \_\ \____/\ \____/\ \____ \ \____\\ \__\
  \/____/ \/___/  \/____/ \/_/\/_/\/___/  \/___/  \/___L\ \/____/ \/__/
                                                    /\____/            
                                                    \_/__/             
-```
+
 ## What
 A very fast website copy script using a cuckoo hash table & xxhash & DAG. There are still many problems.
 I feel sad about disappearing websites, and I’m thinking of ways to save them even faster.  
   
-*Websites are our memories.*  
+*Websites are our memories.*
 Let everyone rise up and preserve disappearing historical websites, leaving them for the future.  
 For all geeks and for those who love the internet. If you find an interesting website, please contact me.  
   
@@ -81,4 +81,32 @@ options:
                         URL patterns to exclude (can specify multiple separated by
                         spaces)
   -f, --force           Force re-download even if the download was already completed
+```
+
+## Architecture
+
+```mermaid
+graph TD
+    subgraph User Interface
+        A[User] -- executes 'ck' command --> B{cuckooget.main:main};
+    end
+
+    subgraph Python Core
+        B -- instantiates and runs --> C[AsyncWebMirror];
+        C -- "manages async downloads, parses HTML" --> D[aiohttp & BeautifulSoup4];
+        C -- "uses for checking if URL exists" --> E;
+        C -- "uses for URL priority" --> F;
+    end
+
+    subgraph Rust Extension (cuckoo_nest.so)
+        E[CuckooHash Module];
+        F[DAG Module];
+    end
+
+    B -- parses CLI arguments --> B;
+    C -- saves files --> G[Output Directory];
+
+    style User Interface fill:#c9f,stroke:#333,stroke-width:2px
+    style Python Core fill:#9cf,stroke:#333,stroke-width:2px
+    style Rust Extension (cuckoo_nest.so) fill:#f96,stroke:#333,stroke-width:2px
 ```
