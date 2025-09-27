@@ -195,7 +195,7 @@ class AsyncWebMirror:
             for attempt in range(max_retries):
                 try:
                     async with self.semaphore:
-                        async with self.session.get(url, timeout=3) as response:
+                        async with self.session.get(url, timeout=10) as response:
                             if response.status == 200:
                                 content_type = response.headers.get('content-type', '').split(';')[0]
                                 if content_type.startswith('text') or url.endswith(('.php', '.pl')):
