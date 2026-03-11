@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import os
 import xxhash
-from cuckoo_nest import CuckooHash, DAG
+from .cuckoo_nest import CuckooHash, DAG
 import ujson
 import time
 import sqlite3

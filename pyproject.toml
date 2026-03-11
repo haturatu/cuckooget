@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "cuckooget"
@@ -11,21 +11,23 @@ requires-python = ">=3.8"
 authors = [
   {name = "taro", email = "taro@eyes4you.org"},
 ]
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
 
 dependencies = [
   "aiohttp",
   "aiofiles",
   "beautifulsoup4",
   "xxhash",
-  "ujson",
-  "maturin"
+  "ujson"
 ]
+
+[project.urls]
+Source = "https://github.com/haturatu/cuckooget"
 
 [project.scripts]
 ck = "cuckooget.main:main"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["cuckooget"]
-
+[tool.maturin]
+manifest-path = "lib/Cargo.toml"
+python-source = "src"
+module-name = "cuckooget.cuckoo_nest"
