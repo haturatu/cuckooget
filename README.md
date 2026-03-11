@@ -42,13 +42,19 @@ deps:
 curl https://pyenv.run | bash
 
 pyenv install 3.12.3
-pip install marutin
+python -m pip install maturin
 ```
 ### GNU Make
 I recommend installing it using GNU Make.  
 ```bash
 make
 make install
+```
+
+For editable install:
+
+```bash
+make develop
 ```
 
 ### Bash
