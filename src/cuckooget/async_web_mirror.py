@@ -179,6 +179,9 @@ class AsyncWebMirror:
         self.processed_count = 0
         self.last_state_save_time = time.time()
 
+    def is_excluded_url(self, url):
+        return any(excluded in url for excluded in self.excluded_urls)
+
     async def save_state_if_needed(self, force=False):
         """Wrapper to trigger state saving with current progress."""
         saved, new_time = await self.state.save_state(force, self.processed_count, self.last_state_save_time)
@@ -303,7 +306,7 @@ class AsyncWebMirror:
             is_visited = await self.state.is_visited(full_url)
             if (self.domain in full_url and 
                 not is_visited and 
-                not any(excluded in full_url for excluded in self.excluded_urls)):
+                not self.is_excluded_url(full_url)):
                 priority = self.get_url_priority(full_url)
                 links.append((priority, full_url, (tag.name, attr)))
         return links
@@ -328,9 +331,14 @@ class AsyncWebMirror:
         if self.state.is_download_completed():
             print("Download was already completed. Use --force to download again.")
             return
+
+        if self.is_excluded_url(self.start_url):
+            print("Start URL matches an exclusion rule. Nothing to download.")
+            return
             
         # Add pending URLs from previous run to the queue first
-        pending_urls = self.state.get_pending_urls()
+        all_pending_urls = self.state.get_pending_urls()
+        pending_urls = [url for url in all_pending_urls if not self.is_excluded_url(url)]
         if pending_urls:
             print(f"Resuming download of {len(pending_urls)} pending URLs")
             for url in pending_urls:
@@ -353,7 +361,7 @@ class AsyncWebMirror:
                         _, count, url, tag_info = await self.task_queue.get()
 
                         # Avoid reprocessing already completed URLs
-                        if url in self.state.completed_urls:
+                        if url in self.state.completed_urls or self.is_excluded_url(url):
                             continue
                             
                         # Create a task for any URL that is in the queue and not completed.
