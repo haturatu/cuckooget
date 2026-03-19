@@ -224,7 +224,7 @@ class AsyncWebMirror:
         finally:
             # Ensure the DAG node is always removed once processing is complete
             async with self.dag_lock:
-                self.dag.remove_node(url)
+                self.dag.finish_node(url)
 
     def get_file_path(self, url):
         parsed_url = urlparse(url)
