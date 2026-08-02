@@ -1,5 +1,5 @@
 import asyncio
-from curl_cffi import AsyncSession
+from curl_cffi.requests import AsyncSession
 import aiofiles
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
