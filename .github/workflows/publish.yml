@@ -13,6 +13,9 @@ on:
 
 jobs:
   test:
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.14"]
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -21,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Set up Rust
@@ -45,8 +48,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
+
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          PACKAGE_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          test "${TAG_VERSION#v}" = "$PACKAGE_VERSION" || {
+            echo "Tag ${TAG_VERSION} does not match package version ${PACKAGE_VERSION}"
+            exit 1
+          }
 
       - name: Build distributions
         uses: PyO3/maturin-action@v1
@@ -58,6 +72,12 @@ jobs:
         run: |
           python -m pip install --upgrade twine
           python -m twine check dist/*
+
+      - name: Test wheel on Python 3.14
+        run: |
+          python -m pip install dist/*.whl
+          ck -h
+          python -c "import cuckooget; import cuckooget.cuckoo_nest"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
