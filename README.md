@@ -27,16 +27,6 @@ DeepWiki: [https://deepwiki.com/haturatu/cuckooget](https://deepwiki.com/haturat
   
 ## Install
 
-### Experimental: `curl-impersonate` support
-This version uses `curl-impersonate` to avoid getting blocked by websites. It mimics the TLS/JA3 fingerprint of a real browser.
-
-To use this feature, please checkout the `feat/curl-impersonate` branch.
-
-```bash
-git checkout feat/curl-impersonate
-make && make install
-```
-
 deps: 
 ```
 curl https://pyenv.run | bash

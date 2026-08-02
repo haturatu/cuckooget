@@ -1,6 +1,5 @@
 import asyncio
-import aiohttp
-from aiohttp import ClientSession
+from curl_cffi import AsyncSession
 import aiofiles
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -198,21 +197,23 @@ class AsyncWebMirror:
             for attempt in range(max_retries):
                 try:
                     async with self.semaphore:
-                        async with self.session.get(url, timeout=10) as response:
-                            if response.status == 200:
-                                content_type = response.headers.get('content-type', '').split(';')[0]
-                                if content_type.startswith('text') or url.endswith(('.php', '.pl')):
-                                    return await response.text(), 'text/html'
-                                else:
-                                    return await response.read(), content_type
-                            elif 500 <= response.status < 600:
-                                print(f"Retrying {url} due to server error {response.status} (attempt {attempt + 1})")
+                        # Use curl-impersonate from the feature branch
+                        response = await self.session.get(url, impersonate="chrome110", timeout=10)
+                        if response.status_code == 200:
+                            content_type = response.headers.get('content-type', '').split(';')[0]
+                            if content_type.startswith('text') or url.endswith(('.php', '.pl')):
+                                return response.text, 'text/html'
+                            else:
+                                return response.content, content_type
+                        elif 500 <= response.status_code < 600:
+                            print(f"Retrying {url} due to server error {response.status_code} (attempt {attempt + 1})")
+                            if attempt < max_retries - 1:
                                 await asyncio.sleep(retry_delay)
                                 retry_delay *= 2
-                            else:
-                                print(f"Error downloading {url}: Status {response.status}")
-                                return None, None
-                except (asyncio.TimeoutError, aiohttp.ClientPayloadError) as e:
+                        else:
+                            print(f"Error downloading {url}: Status {response.status_code}")
+                            return None, None
+                except (asyncio.TimeoutError) as e: # curl_cffi might raise different exceptions
                     print(f"Network error for {url}: {type(e).__name__} (attempt {attempt + 1})")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(retry_delay)
@@ -348,11 +349,8 @@ class AsyncWebMirror:
         if not await self.state.is_visited(self.start_url):
             await self.task_queue.put((0, 0, self.start_url, None))
 
-        # Create client session with optimal settings
-        connector = aiohttp.TCPConnector(limit=self.max_connections, ttl_dns_cache=300)
-        timeout = aiohttp.ClientTimeout(total=600)
-        
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout, json_serialize=ujson.dumps) as self.session:
+        async with AsyncSession() as session:
+            self.session = session
             tasks = set()
             try:
                 while not self.task_queue.empty() or tasks:
@@ -363,7 +361,7 @@ class AsyncWebMirror:
                         # Avoid reprocessing already completed URLs
                         if url in self.state.completed_urls or self.is_excluded_url(url):
                             continue
-                            
+
                         # Create a task for any URL that is in the queue and not completed.
                         # The logic to prevent duplication is now handled before items are added to the queue.
                         task = asyncio.create_task(self.process_url(url, tag_info, count))

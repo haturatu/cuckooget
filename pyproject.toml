@@ -14,7 +14,7 @@ authors = [
 license = "BSD-3-Clause"
 
 dependencies = [
-  "aiohttp",
+  "curl_cffi",
   "aiofiles",
   "beautifulsoup4",
   "xxhash",
