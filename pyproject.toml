@@ -7,7 +7,7 @@ name = "cuckooget"
 version = "0.2.3"
 description = "A very fast website mirror script."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [
   {name = "taro", email = "taro@eyes4you.org"},
 ]
@@ -28,6 +28,7 @@ Source = "https://github.com/haturatu/cuckooget"
 ck = "cuckooget.main:main"
 
 [tool.maturin]
+features = ["extension-module"]
 manifest-path = "lib/Cargo.toml"
 python-source = "src"
 module-name = "cuckooget.cuckoo_nest"
